@@ -1,0 +1,54 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+venv311/
+env/
+ENV/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Runtime logs and temporary outputs
+*.log
+logs/
+tmp/
+temp/
+runs/
+
+# AgentDojo / collection transient files
+agentdojo_*.jsonl
+agentdojo_*.log
+groq_*.jsonl
+groq_*.log
+
+# Model training scratch artifacts
+checkpoints/
+wandb/
+mlruns/
+
+# Keep paper artifacts tracked intentionally:
+# - data/*.jsonl
+# - models_saved/*.pt
