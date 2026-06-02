@@ -6,7 +6,7 @@
 [![SHAP](https://img.shields.io/badge/SHAP-0.43+-green)]()
 [![AgentDojo](https://img.shields.io/badge/AgentDojo-Groq-purple)]()
 
-**Author:** Nguyen Hoang Minh — SE0001 K49  
+**Author:** Nguyen Hoang Minh - SE0001 K49  
 **Supervisor:** Dr. Nguyen Quoc Hung  
 **Institution:** University of Economics Ho Chi Minh City (UEH)  
 
@@ -59,7 +59,7 @@ Current evaluation on the generated paper benchmark:
 
 | Model | Accuracy | Precision | Recall | F1 | AUC | FDR |
 |---|---:|---:|---:|---:|---:|---:|
-| Rule-based | 0.340 | 0.340 | 1.000 | 0.507 | 0.847 | 0.660 |
+| Rule-based | 0.340 | 0.340 | 1.000 | 0.507 | 0.873 | 0.660 |
 | Isolation Forest | 0.842 | 0.720 | 0.874 | 0.789 | 0.919 | 0.280 |
 | Log Parser | 0.717 | 1.000 | 0.167 | 0.286 | 0.583 | 0.000 |
 | Sandbox Monitor | 0.717 | 1.000 | 0.167 | 0.286 | 0.583 | 0.000 |
@@ -343,7 +343,13 @@ Windows:
 Start the FastAPI service after training:
 
 ```bash
-uvicorn api.main_api:app --reload --port 8000
+python -m uvicorn api.main_api:app --reload --port 8000
+```
+
+Windows with `venv311`:
+
+```powershell
+.\venv311\Scripts\python.exe -m uvicorn api.main_api:app --reload --port 8000
 ```
 
 Open:
@@ -391,13 +397,26 @@ Example response fields:
 ```json
 {
   "session_id": "demo-session",
-  "risk_score": 0.42,
-  "learned_score": 0.31,
-  "rule_score": 0.55,
-  "severity_tier": "medium",
-  "attributions": {},
-  "triggered_rules": [],
-  "narrative": "..."
+  "risk_score": 0.983,
+  "learned_score": 0.997,
+  "rule_score": 0.950,
+  "severity_tier": "Critical",
+  "attributions": {
+    "bdi_deviation": 0.141,
+    "privilege_level": 0.013,
+    "privilege_escalation": 0.001,
+    "transition_anomaly": 0.006,
+    "sequence_anomaly": 0.997,
+    "token_burst": 0.010
+  },
+  "triggered_rules": [
+    "read_database_to_send_email",
+    "transition_anomaly_medium",
+    "bdi_deviation_medium",
+    "token_burst_medium",
+    "token_burst_high"
+  ],
+  "narrative": "Risk is elevated due to sequence anomaly, combined with bdi deviation."
 }
 ```
 
@@ -405,14 +424,14 @@ To load a different checkpoint:
 
 ```bash
 set DARS_MODEL_PATH=models_saved/dars_model_real.pt
-uvicorn api.main_api:app --reload --port 8000
+python -m uvicorn api.main_api:app --reload --port 8000
 ```
 
 On PowerShell:
 
 ```powershell
 $env:DARS_MODEL_PATH="models_saved/dars_model_real.pt"
-uvicorn api.main_api:app --reload --port 8000
+.\venv311\Scripts\python.exe -m uvicorn api.main_api:app --reload --port 8000
 ```
 
 ---
@@ -583,7 +602,7 @@ Train first or point `DARS_MODEL_PATH` to an existing checkpoint:
 
 ```bash
 python train.py
-uvicorn api.main_api:app --reload --port 8000
+python -m uvicorn api.main_api:app --reload --port 8000
 ```
 
 ---
@@ -619,7 +638,7 @@ python data/generate_data.py --seed-file data/real_seed_traces.jsonl --seed 42
 python train.py
 python evaluate.py
 python scripts/check_paper_artifacts.py
-uvicorn api.main_api:app --reload --port 8000
+python -m uvicorn api.main_api:app --reload --port 8000
 ```
 
 Windows with `venv311`:
@@ -629,7 +648,7 @@ Windows with `venv311`:
 .\venv311\Scripts\python.exe train.py
 .\venv311\Scripts\python.exe evaluate.py
 .\venv311\Scripts\python.exe scripts\check_paper_artifacts.py
-uvicorn api.main_api:app --reload --port 8000
+.\venv311\Scripts\python.exe -m uvicorn api.main_api:app --reload --port 8000
 ```
 
 ---
