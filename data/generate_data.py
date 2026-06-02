@@ -32,6 +32,15 @@ RISKY_TOOLS = {
     "root_shell",
     "delete_user",
     "transfer_funds",
+    "send_money",
+    "update_password",
+    "update_scheduled_transaction",
+    "reserve_hotel",
+    "add_user_to_channel",
+    "invite_user_to_slack",
+    "send_direct_message",
+    "send_channel_message",
+    "post_webpage",
 }
 
 SCENARIO_SEVERITY = {
@@ -193,10 +202,12 @@ def tools_from(seeds: list[dict], label: int | None = None) -> list[str]:
     return sorted(set(tools))
 
 
-def malicious_calls(seeds: list[dict]) -> list[dict]:
+def malicious_calls(seeds: list[dict], domain: str | None = None) -> list[dict]:
     calls = []
     for trace in seeds:
         if int(trace.get("label", 0)) == 1:
+            if domain is not None and normalize_domain(trace.get("domain", "")) != domain:
+                continue
             calls.extend(trace.get("tool_calls", []))
     return calls
 
@@ -209,12 +220,17 @@ def benign_calls(seeds: list[dict]) -> list[dict]:
     return calls
 
 
-def choose_risky_call(seeds: list[dict]) -> dict:
+def choose_risky_call(seeds: list[dict], domain: str | None = None) -> dict:
     risky = [
-        call for call in malicious_calls(seeds)
+        call for call in malicious_calls(seeds, domain=domain)
         if call.get("tool", "unknown") in RISKY_TOOLS
     ]
-    pool = risky or malicious_calls(seeds)
+    if not risky and domain is not None:
+        risky = [
+            call for call in malicious_calls(seeds)
+            if call.get("tool", "unknown") in RISKY_TOOLS
+        ]
+    pool = risky or malicious_calls(seeds, domain=domain) or malicious_calls(seeds)
     return deepcopy(random.choice(pool))
 
 
@@ -312,7 +328,15 @@ def synthesize_from_seed(
             for _ in range(random.randint(2, 5)):
                 calls.append(copy_call(repeat_call, len(calls), token_profiles, multiplier=2.8))
         elif scenario == "S6_stealth_mimicry":
-            benign_seeds = [trace for trace in all_seeds if int(trace.get("label", 0)) == 0]
+            seed_domain = normalize_domain(seed_trace.get("domain", "unknown"))
+            benign_seeds = [
+                trace
+                for trace in all_seeds
+                if int(trace.get("label", 0)) == 0
+                and normalize_domain(trace.get("domain", "")) == seed_domain
+            ]
+            if not benign_seeds:
+                benign_seeds = [trace for trace in all_seeds if int(trace.get("label", 0)) == 0]
             mimic_base = random.choice(benign_seeds)
             calls = [
                 copy_call(call, i, token_profiles)
@@ -320,7 +344,14 @@ def synthesize_from_seed(
             ]
             if calls:
                 replace_at = random.randint(1, len(calls) - 1) if len(calls) > 1 else 0
-                calls[replace_at] = copy_call(choose_risky_call(all_seeds), replace_at, token_profiles)
+                replacement = copy_call(
+                    choose_risky_call(all_seeds, domain=seed_domain),
+                    replace_at,
+                    token_profiles,
+                    multiplier=0.95,
+                )
+                replacement["success"] = True
+                calls[replace_at] = replacement
         else:
             calls.append(copy_call(choose_risky_call(all_seeds), len(calls), token_profiles))
 

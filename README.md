@@ -60,30 +60,40 @@ Current evaluation on the generated paper benchmark:
 | Model | Accuracy | Precision | Recall | F1 | AUC | FDR |
 |---|---:|---:|---:|---:|---:|---:|
 | Rule-based | 0.340 | 0.340 | 1.000 | 0.507 | 0.847 | 0.660 |
-| Isolation Forest | 0.887 | 0.819 | 0.856 | 0.837 | 0.935 | 0.181 |
+| Isolation Forest | 0.842 | 0.720 | 0.874 | 0.789 | 0.919 | 0.280 |
 | Log Parser | 0.717 | 1.000 | 0.167 | 0.286 | 0.583 | 0.000 |
 | Sandbox Monitor | 0.717 | 1.000 | 0.167 | 0.286 | 0.583 | 0.000 |
-| Standard LSTM | 0.942 | 0.941 | 0.885 | 0.912 | 0.972 | 0.059 |
-| **DARS** | **0.946** | **0.952** | **0.885** | **0.917** | **0.980** | **0.048** |
+| Standard LSTM | 0.946 | 0.960 | 0.878 | 0.917 | 0.988 | 0.040 |
+| **DARS** | **0.952** | **0.946** | **0.911** | **0.928** | **0.985** | **0.054** |
 
 Risk scoring quality:
 
 | Metric | Value |
 |---|---:|
-| Expected Calibration Error (ECE) | 0.008 |
-| Spearman ranking correlation | 0.835 |
-| NDCG@10 | 0.901 |
+| Expected Calibration Error (ECE) | 0.015 |
+| Spearman ranking correlation | 0.691 |
+| NDCG@10 | 0.851 |
 
 Scenario-level F1:
 
 | Scenario | F1 |
 |---|---:|
-| S1 prompt injection | 0.837 |
-| S2 privilege escalation | 0.882 |
-| S3 malicious API usage | 0.882 |
-| S4 data exfiltration | 0.882 |
-| S5 denial of wallet | 0.860 |
-| S6 stealth mimicry | 0.519 |
+| S1 prompt injection | 0.832 |
+| S2 privilege escalation | 0.865 |
+| S3 malicious API usage | 0.865 |
+| S4 data exfiltration | 0.843 |
+| S5 denial of wallet | 0.865 |
+| S6 stealth mimicry | 0.612 |
+
+Robustness checks are available through `scripts/robustness_experiment.py`:
+
+| Condition | F1 | AUC | FDR |
+|---|---:|---:|---:|
+| Baseline | 0.928 | 0.985 | 0.054 |
+| 20% token noise | 0.934 | 0.986 | 0.046 |
+| 10% telemetry dropout | 0.857 | 0.950 | 0.141 |
+| 10% benign insertions | 0.894 | 0.966 | 0.116 |
+| Adaptive S6 mimicry | 0.671 | 0.871 | 0.048 |
 
 These numbers are produced by `evaluate.py` after training `models_saved/dars_model_real.pt`.
 
@@ -179,6 +189,7 @@ DARS-Github-Repo-V2/
 |   |-- check_collection_coverage.py    # Incremental real-trace coverage report
 |   |-- check_paper_artifacts.py        # Structural artifact validation
 |   |-- parse_agentdojo_logs.py         # AgentDojo log parser
+|   |-- robustness_experiment.py        # Token-noise, dropout, insertion, and S6 stress tests
 |   |-- run_groq_benchmark.ps1          # Single AgentDojo/Groq benchmark launcher
 |   `-- run_groq_stepwise.ps1           # Stepwise collection helper
 |
@@ -311,6 +322,18 @@ python evaluate.py \
   --train data/train_traces.jsonl \
   --val data/val_traces.jsonl \
   --model models_saved/dars_model_real.pt
+```
+
+Run robustness experiments:
+
+```bash
+python scripts/robustness_experiment.py
+```
+
+Windows:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\robustness_experiment.py
 ```
 
 ---
