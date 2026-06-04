@@ -48,6 +48,9 @@ groq_*.log
 checkpoints/
 wandb/
 mlruns/
+*.docx
+*.docm
+
 
 # Keep paper artifacts tracked intentionally:
 # - data/*.jsonl
