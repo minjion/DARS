@@ -48,10 +48,19 @@ groq_*.log
 checkpoints/
 wandb/
 mlruns/
+
+# Document / paper working files
 *.docx
 *.docm
+original_paper_text.txt
+paper_text_extract.txt
+extract_docm.ps1
 
+# Generated figures and script outputs
+scripts/figures/
+scripts/*_results.txt
 
 # Keep paper artifacts tracked intentionally:
 # - data/*.jsonl
 # - models_saved/*.pt
+paper_revised_final.md

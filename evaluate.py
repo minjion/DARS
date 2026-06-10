@@ -6,10 +6,11 @@ from collections import defaultdict
 
 import numpy as np
 import torch
+import torch.nn as nn
 from sklearn.ensemble import IsolationForest
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import accuracy_score, f1_score, ndcg_score, precision_score, recall_score, roc_auc_score
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -218,6 +219,166 @@ def sandbox_monitor_scores(traces: list[dict]) -> np.ndarray:
     return np.array(scores, dtype=float)
 
 
+# ---------------------------------------------------------------------------
+# DeepLog baseline: LSTM that predicts the next tool in a sequence.
+# Anomaly score = average cross-entropy loss per trace.
+# ---------------------------------------------------------------------------
+
+
+class DeepLogModel(nn.Module):
+    """Simple LSTM language model over tool-call sequences (DeepLog-style)."""
+
+    def __init__(self, vocab_size: int, embed_dim: int = 32, hidden_dim: int = 64, num_layers: int = 2):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.lstm = nn.LSTM(
+            input_size=embed_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=0.1 if num_layers > 1 else 0.0,
+        )
+        self.fc = nn.Linear(hidden_dim, vocab_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (batch, seq_len) of token ids -> (batch, seq_len, vocab_size) logits."""
+        emb = self.embedding(x)
+        out, _ = self.lstm(emb)
+        return self.fc(out)
+
+
+def build_tool_vocab(traces: list[dict]) -> dict[str, int]:
+    """Build tool -> index mapping. Index 0 is reserved for padding."""
+    tools: set[str] = set()
+    for trace in traces:
+        for call in trace.get("tool_calls", []):
+            tools.add(call.get("tool", "unknown"))
+    vocab = {"<PAD>": 0}
+    for idx, tool in enumerate(sorted(tools), start=1):
+        vocab[tool] = idx
+    return vocab
+
+
+def traces_to_sequences(traces: list[dict], vocab: dict[str, int], max_len: int = 20) -> list[list[int]]:
+    """Convert traces into integer-encoded tool sequences (capped at max_len)."""
+    unk_id = max(vocab.values()) + 1  # out-of-vocab fallback
+    seqs: list[list[int]] = []
+    for trace in traces:
+        seq = [vocab.get(call.get("tool", "unknown"), unk_id) for call in trace.get("tool_calls", [])]
+        seqs.append(seq[:max_len])
+    return seqs
+
+
+def train_deeplog(
+    benign_traces: list[dict],
+    device: torch.device,
+    max_len: int = 20,
+    epochs: int = 12,
+    lr: float = 1e-3,
+    batch_size: int = 32,
+    patience: int = 4,
+) -> tuple[DeepLogModel, dict[str, int]]:
+    """Train a DeepLog model on benign traces and return (model, vocab)."""
+    vocab = build_tool_vocab(benign_traces)
+    vocab_size = len(vocab) + 1  # +1 for possible unk
+    seqs = traces_to_sequences(benign_traces, vocab, max_len)
+
+    # Build input/target pairs: input = seq[:-1], target = seq[1:]
+    inputs: list[torch.Tensor] = []
+    targets: list[torch.Tensor] = []
+    for seq in seqs:
+        if len(seq) < 2:
+            continue
+        inputs.append(torch.tensor(seq[:-1], dtype=torch.long))
+        targets.append(torch.tensor(seq[1:], dtype=torch.long))
+
+    if not inputs:
+        # Not enough data – return untrained model
+        model = DeepLogModel(vocab_size).to(device)
+        return model, vocab
+
+    # Pad to equal length within this batch
+    max_seq = max(t.size(0) for t in inputs)
+    padded_in = torch.zeros(len(inputs), max_seq, dtype=torch.long)
+    padded_tgt = torch.zeros(len(targets), max_seq, dtype=torch.long)
+    for i, (inp, tgt) in enumerate(zip(inputs, targets)):
+        padded_in[i, : inp.size(0)] = inp
+        padded_tgt[i, : tgt.size(0)] = tgt
+
+    dataset = TensorDataset(padded_in, padded_tgt)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    model = DeepLogModel(vocab_size).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=0)  # ignore padding
+
+    best_loss = float("inf")
+    best_state = None
+    stale = 0
+    for epoch in range(1, epochs + 1):
+        model.train()
+        epoch_loss = 0.0
+        for batch_in, batch_tgt in loader:
+            batch_in, batch_tgt = batch_in.to(device), batch_tgt.to(device)
+            logits = model(batch_in)  # (B, T, V)
+            loss = loss_fn(logits.reshape(-1, logits.size(-1)), batch_tgt.reshape(-1))
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        avg_loss = epoch_loss / max(len(loader), 1)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            stale = 0
+        else:
+            stale += 1
+        if stale >= patience:
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    model.eval()
+    return model, vocab
+
+
+def deeplog_anomaly_scores(
+    model: DeepLogModel,
+    traces: list[dict],
+    vocab: dict[str, int],
+    device: torch.device,
+    max_len: int = 20,
+) -> np.ndarray:
+    """Score each trace by average next-tool prediction cross-entropy."""
+    loss_fn = nn.CrossEntropyLoss(ignore_index=0, reduction="none")
+    seqs = traces_to_sequences(traces, vocab, max_len)
+    raw_scores: list[float] = []
+
+    model.eval()
+    with torch.no_grad():
+        for seq in seqs:
+            if len(seq) < 2:
+                raw_scores.append(0.0)
+                continue
+            inp = torch.tensor([seq[:-1]], dtype=torch.long, device=device)
+            tgt = torch.tensor([seq[1:]], dtype=torch.long, device=device)
+            logits = model(inp)  # (1, T, V)
+            per_step = loss_fn(logits.squeeze(0), tgt.squeeze(0))  # (T,)
+            # Average over non-padding positions
+            mask = tgt.squeeze(0) != 0
+            if mask.any():
+                raw_scores.append(float(per_step[mask].mean().item()))
+            else:
+                raw_scores.append(0.0)
+
+    raw = np.array(raw_scores, dtype=float)
+    # Normalize to [0, 1]
+    mn, mx = float(raw.min()), float(raw.max())
+    if mx - mn < 1e-9:
+        return np.full_like(raw, 0.5)
+    return (raw - mn) / (mx - mn)
+
+
 def isolation_forest_scores(train_features: np.ndarray, test_features: np.ndarray) -> np.ndarray:
     detector = IsolationForest(contamination=0.15, random_state=42)
     detector.fit(train_features)
@@ -310,11 +471,28 @@ def calibrate_scores(val_labels: np.ndarray, val_scores: np.ndarray, test_scores
     return np.asarray(calibrator.transform(test_scores), dtype=float)
 
 
+def _compute_s6_f1(
+    traces: list[dict], labels: np.ndarray, scores: np.ndarray, threshold: float,
+) -> float:
+    """Return F1 evaluated on S6 (stealth mimicry) positives + all benign negatives."""
+    preds = (scores >= threshold).astype(int)
+    benign_idx = [i for i, lbl in enumerate(labels) if int(lbl) == 0]
+    s6_idx = [
+        i for i, trace in enumerate(traces)
+        if trace.get("scenario", "").startswith("S6") and int(labels[i]) == 1
+    ]
+    if not s6_idx:
+        return float("nan")
+    subset = benign_idx + s6_idx
+    return float(f1_score(labels[subset], preds[subset], zero_division=0))
+
+
 def run_ablation(
     ablation_models: dict[str, tuple[DARSClassifier, torch.Tensor]],
     dataset: AgentDojoDataset,
     labels: np.ndarray,
     device: torch.device,
+    traces: list[dict] | None = None,
 ) -> None:
     print("\n=== Feature Ablation ===")
     if not ablation_models:
@@ -328,9 +506,18 @@ def run_ablation(
         _, scores, _ = predict_model(model, dataset, device, mask)
         threshold, _ = tune_threshold(labels, scores)
         metrics = classification_metrics(labels, scores, threshold=threshold)
+        # Extended ablation metrics
+        ece = expected_calibration_error(labels, scores)
+        spearman = spearman_rank_correlation(labels, scores)
+        s6_f1_str = "N/A"
+        if traces is not None:
+            s6_val = _compute_s6_f1(traces, labels, scores, threshold)
+            s6_f1_str = f"{s6_val:.3f}" if not np.isnan(s6_val) else "N/A"
         print(
             f"w/o {feature_name:20s} "
-            f"F1={metrics['f1']:.3f} AUC={metrics['roc_auc']:.3f} threshold={threshold:.3f}"
+            f"F1={metrics['f1']:.3f} AUC={metrics['roc_auc']:.3f} "
+            f"S6_F1={s6_f1_str} ECE={ece:.3f} Spearman={spearman:.3f} "
+            f"threshold={threshold:.3f}"
         )
     print("w/o shap                 F1 unchanged; SHAP affects explanation, not classifier output.")
 
@@ -375,6 +562,14 @@ def main() -> None:
     if_scores, if_ms = timed_scores(isolation_forest_scores, benign_train_features, test_features)
     logp_scores, logp_ms = timed_scores(log_parser_scores, test_traces)
     sandbox_scores, sandbox_ms = timed_scores(sandbox_monitor_scores, test_traces)
+
+    # --- DeepLog baseline ---
+    benign_train_traces = [t for t in train_traces if int(t.get("label", 0)) == 0]
+    print("Training DeepLog baseline on benign tool sequences...")
+    deeplog_model, deeplog_vocab = train_deeplog(benign_train_traces, device)
+    deeplog_scores, deeplog_ms = timed_scores(
+        deeplog_anomaly_scores, deeplog_model, test_traces, deeplog_vocab, device,
+    )
     blend_alpha, dars_threshold, val_blend_f1 = tune_blend_and_threshold(
         val_labels,
         val_learned_scores,
@@ -398,6 +593,7 @@ def main() -> None:
     print_metric_row("Isolation Forest", labels, if_scores, if_ms)
     print_metric_row("Log Parser", labels, logp_scores, logp_ms)
     print_metric_row("Sandbox Monitor", labels, sandbox_scores, sandbox_ms)
+    print_metric_row("DeepLog", labels, deeplog_scores, deeplog_ms)
     if standard_scores is not None:
         print_metric_row("Standard LSTM", labels, standard_scores, standard_ms)
     else:
@@ -418,7 +614,7 @@ def main() -> None:
     print(f"NDCG@10={dars_metrics['ndcg@10']:.3f}")
 
     print_scenario_f1(test_traces, labels, dars_scores, threshold=dars_threshold)
-    run_ablation(ablation_models, test_dataset, labels, device)
+    run_ablation(ablation_models, test_dataset, labels, device, traces=test_traces)
 
 
 if __name__ == "__main__":
