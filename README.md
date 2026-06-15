@@ -186,8 +186,19 @@ DARS-Github-Repo-V2/
 |   `-- dars_model_real.pt              # Trained DARS checkpoint
 |
 |-- scripts/
+|   |-- bdi_variant_ablation.py         # BDI component ablation (Table 6)
+|   |-- bdi_variant_results.txt         # BDI ablation results
 |   |-- check_collection_coverage.py    # Incremental real-trace coverage report
 |   |-- check_paper_artifacts.py        # Structural artifact validation
+|   |-- dataset_validation.py           # JSD/Wasserstein seed-vs-synthetic validation (Table 3)
+|   |-- dataset_validation_results.txt  # Dataset validation results
+|   |-- distribution_analysis.py        # KS-test distribution analysis
+|   |-- enhanced_scalability.py         # CPU/RAM/GPU scalability benchmark (Table 9)
+|   |-- enhanced_scalability_results.txt# Scalability results
+|   |-- error_analysis_quantitative.py  # Per-scenario error analysis (Table 8)
+|   |-- error_analysis_results.txt      # Error analysis results
+|   |-- figures/                        # Generated SHAP plots and t-SNE visualization
+|   |-- generate_shap_plots.py          # SHAP figure generation (Fig. 1-3)
 |   |-- parse_agentdojo_logs.py         # AgentDojo log parser
 |   |-- robustness_experiment.py        # Token-noise, dropout, insertion, and S6 stress tests
 |   |-- run_groq_benchmark.ps1          # Single AgentDojo/Groq benchmark launcher
@@ -203,7 +214,6 @@ DARS-Github-Repo-V2/
 |-- train.py                            # Training entry point
 |-- evaluate.py                         # Evaluation, baselines, ablations
 |-- requirements.txt                    # Python dependencies
-|-- README-template.md                  # Original README template
 `-- README.md                           # This file
 ```
 
